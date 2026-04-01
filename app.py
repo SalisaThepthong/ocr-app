@@ -27,7 +27,7 @@ def extract_orders_from_image(image, page_num):
     results = []
 
     # 🔥 จับเฉพาะ Shopee Order No.
-    matches = re.findall(r'Shopee\s*Order\s*No\.?\s*[:\-]?\s*(\d+)', text, re.IGNORECASE)
+    matches = re.findall(r'Sho?ppee?\s*Order\s*N[o0]\.?\s*[:\-]?\s*([A-Z0-9]+)', text, re.IGNORECASE)
 
     for order in matches:
         results.append({
@@ -36,7 +36,12 @@ def extract_orders_from_image(image, page_num):
         })
 
     return results
+# มันรองรับ:
 
+# Shopee Order No. 123456
+# Shopee Order No: 123456
+# ShopeeOrderNo 123456
+# เว้นวรรคมั่ว ๆ ก็ยังจับได้
 # ----------------------
 # FILE UPLOAD
 # ----------------------
