@@ -24,14 +24,16 @@ def extract_orders_from_image(image, page_num):
 
     text = pytesseract.image_to_string(thresh)
 
+    matches = re.findall(
+        r'Sho?ppee?\s*Order\s*N[o0]\.?\s*[:\-]?\s*([A-Z0-9]+)',
+        text,
+        re.IGNORECASE
+    )
+
     results = []
-
-    # 🔥 จับเฉพาะ Shopee Order No.
-    matches = re.findall(r'Sho?ppee?\s*Order\s*N[o0]\.?\s*[:\-]?\s*([A-Z0-9]+)', text, re.IGNORECASE)
-
     for order in matches:
         results.append({
-            "Order Number": order,
+            "Order Number": order.upper(),  # กันพลาด lowercase
             "Page": page_num
         })
 
