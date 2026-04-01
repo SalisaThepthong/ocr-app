@@ -4,105 +4,85 @@ import cv2
 import numpy as np
 import pandas as pd
 import re
-from PIL import Image
 from pdf2image import convert_from_bytes
 
-st.set_page_config(page_title="OCR Order Reader", layout="centered")
+st.title("📄 OCR Shopee Order (รองรับหลาย PDF)")
 
-st.title("📄 OCR ใบแปะหน้า (PDF รองรับหลายหน้า)")
-st.write("อัปโหลด PDF / รูป → ดึงเลข Order → Export Excel")
+# CONFIG
+MAX_FILES_PER_BATCH = 10
+MAX_PAGES = 15
 
-# ----------------------
-# OCR FUNCTION
-# ----------------------
-def extract_orders_from_image(image, page_num):
-    img = np.array(image)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+uploaded_files = st.file_uploader(
+    "📤 อัปโหลด PDF (หลายไฟล์)",
+    type=["pdf"],
+    accept_multiple_files=True
+)
 
-    gray = cv2.GaussianBlur(gray, (5,5), 0)
-    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
-
-    text = pytesseract.image_to_string(thresh)
-
+def extract_orders(text, page, file_name):
     matches = re.findall(
         r'Sho?ppee?\s*Order\s*N[o0]\.?\s*[:\-]?\s*([A-Z0-9]+)',
         text,
         re.IGNORECASE
     )
 
-    results = []
-    for order in matches:
-        results.append({
-            "Order Number": order.upper(),  # กันพลาด lowercase
-            "Page": page_num
-        })
+    return [{
+        "Order Number": m.upper(),
+        "Page": page,
+        "File": file_name
+    } for m in matches]
 
-    return results
-# มันรองรับ:
+if uploaded_files:
 
-# Shopee Order No. 123456
-# Shopee Order No: 123456
-# ShopeeOrderNo 123456
-# เว้นวรรคมั่ว ๆ ก็ยังจับได้
-# ----------------------
-# FILE UPLOAD
-# ----------------------
-uploaded_file = st.file_uploader(
-    "📤 อัปโหลดไฟล์",
-    type=["jpg", "jpeg", "png", "pdf"]
-)
+    all_results = []
 
-if uploaded_file:
-    all_orders = []
+    total_files = len(uploaded_files)
+    st.info(f"📦 จำนวนไฟล์ทั้งหมด: {total_files}")
 
-    with st.spinner("🔍 กำลังประมวลผล... (PDF ใหญ่จะใช้เวลา)"):
-        
-        # ----------------------
-        # PDF CASE
-        # ----------------------
-        if uploaded_file.type == "application/pdf":
-            pages = convert_from_bytes(uploaded_file.read())
+    # 🔥 แบ่ง batch
+    batches = [uploaded_files[i:i + MAX_FILES_PER_BATCH] 
+               for i in range(0, total_files, MAX_FILES_PER_BATCH)]
 
-            st.info(f"📄 จำนวนหน้า: {len(pages)}")
+    progress = st.progress(0)
 
-            for i, page in enumerate(pages):
-                st.write(f"กำลังอ่านหน้า {i+1}...")
-                results = extract_orders_from_image(page, i+1)
-                all_orders.extend(results)
+    for batch_index, batch in enumerate(batches):
+        st.write(f"🚀 Batch {batch_index+1}/{len(batches)}")
 
-        # ----------------------
-        # IMAGE CASE
-        # ----------------------
-        else:
-            image = Image.open(uploaded_file)
-            st.image(image, caption="📸 ภาพที่อัปโหลด")
+        for uploaded_file in batch:
 
-            results = extract_orders_from_image(image, 1)
-            all_orders.extend(results)
+            images = convert_from_bytes(
+                uploaded_file.read(),
+                dpi=100,
+                fmt="jpeg"
+            )
 
-    # ----------------------
+            for i, page in enumerate(images):
+
+                if i >= MAX_PAGES:
+                    break
+
+                img = np.array(page)
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+
+                text = pytesseract.image_to_string(thresh)
+
+                results = extract_orders(text, i+1, uploaded_file.name)
+                all_results.extend(results)
+
+        progress.progress((batch_index + 1) / len(batches))
+
     # RESULT
-    # ----------------------
-    st.subheader("📦 Order ที่พบ")
+    st.subheader("📦 Order ทั้งหมด")
 
-    if all_orders:
-        df = pd.DataFrame(all_orders)
+    if all_results:
+        df = pd.DataFrame(all_results).drop_duplicates()
 
-        # ลบ duplicate (optional)
-        df = df.drop_duplicates()
+        st.dataframe(df)
 
-        st.dataframe(df, use_container_width=True)
-
-        # Export Excel
         file_name = "orders.xlsx"
         df.to_excel(file_name, index=False)
 
         with open(file_name, "rb") as f:
-            st.download_button(
-                "📥 Download Excel",
-                f,
-                file_name,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            st.download_button("📥 Download Excel", f, file_name)
     else:
         st.warning("❌ ไม่พบ Order")
