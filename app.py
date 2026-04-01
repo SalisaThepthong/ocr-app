@@ -6,18 +6,24 @@ import pandas as pd
 import re
 from pdf2image import convert_from_bytes
 
-st.title("📄 OCR Shopee Order (รองรับหลาย PDF)")
+st.title("📄 OCR Shopee Order (Batch Processing)")
 
 # CONFIG
-MAX_FILES_PER_BATCH = 10
+BATCH_SIZE = 10
 MAX_PAGES = 15
 
-uploaded_files = st.file_uploader(
-    "📤 อัปโหลด PDF (หลายไฟล์)",
-    type=["pdf"],
-    accept_multiple_files=True
-)
+# ----------------------
+# SESSION STATE
+# ----------------------
+if "results" not in st.session_state:
+    st.session_state.results = []
 
+if "processed_files" not in st.session_state:
+    st.session_state.processed_files = 0
+
+# ----------------------
+# FUNCTION
+# ----------------------
 def extract_orders(text, page, file_name):
     matches = re.findall(
         r'Sho?ppee?\s*Order\s*N[o0]\.?\s*[:\-]?\s*([A-Z0-9]+)',
@@ -31,58 +37,94 @@ def extract_orders(text, page, file_name):
         "File": file_name
     } for m in matches]
 
-if uploaded_files:
+# ----------------------
+# UPLOAD
+# ----------------------
+uploaded_files = st.file_uploader(
+    "📤 อัปโหลด PDF (หลายไฟล์)",
+    type=["pdf"],
+    accept_multiple_files=True
+)
 
-    all_results = []
+if uploaded_files:
 
     total_files = len(uploaded_files)
     st.info(f"📦 จำนวนไฟล์ทั้งหมด: {total_files}")
 
-    # 🔥 แบ่ง batch
-    batches = [uploaded_files[i:i + MAX_FILES_PER_BATCH] 
-               for i in range(0, total_files, MAX_FILES_PER_BATCH)]
+    # แบ่ง batch
+    batches = [uploaded_files[i:i+BATCH_SIZE] 
+               for i in range(0, total_files, BATCH_SIZE)]
 
-    progress = st.progress(0)
+    st.write(f"🔄 แบ่งเป็น {len(batches)} batch")
 
-    for batch_index, batch in enumerate(batches):
-        st.write(f"🚀 Batch {batch_index+1}/{len(batches)}")
+    # ----------------------
+    # PROCESS BUTTON
+    # ----------------------
+    if st.button("🚀 เริ่มประมวลผล"):
 
-        for uploaded_file in batch:
+        progress = st.progress(0)
 
-            images = convert_from_bytes(
-                uploaded_file.read(),
-                dpi=100,
-                fmt="jpeg"
-            )
+        for batch_index, batch in enumerate(batches):
 
-            for i, page in enumerate(images):
+            st.write(f"📦 Batch {batch_index+1}/{len(batches)}")
 
-                if i >= MAX_PAGES:
-                    break
+            for uploaded_file in batch:
 
-                img = np.array(page)
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+                try:
+                    images = convert_from_bytes(
+                        uploaded_file.read(),
+                        dpi=100,
+                        first_page=1,
+                        last_page=MAX_PAGES
+                    )
+                except Exception as e:
+                    st.error(f"❌ อ่านไฟล์ {uploaded_file.name} ไม่ได้")
+                    continue
 
-                text = pytesseract.image_to_string(thresh)
+                for i, page in enumerate(images):
 
-                results = extract_orders(text, i+1, uploaded_file.name)
-                all_results.extend(results)
+                    img = np.array(page)
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
 
-        progress.progress((batch_index + 1) / len(batches))
+                    text = pytesseract.image_to_string(thresh)
 
-    # RESULT
-    st.subheader("📦 Order ทั้งหมด")
+                    results = extract_orders(
+                        text,
+                        i+1,
+                        uploaded_file.name
+                    )
 
-    if all_results:
-        df = pd.DataFrame(all_results).drop_duplicates()
+                    st.session_state.results.extend(results)
 
-        st.dataframe(df)
+                st.session_state.processed_files += 1
 
-        file_name = "orders.xlsx"
-        df.to_excel(file_name, index=False)
+            progress.progress((batch_index+1)/len(batches))
 
-        with open(file_name, "rb") as f:
-            st.download_button("📥 Download Excel", f, file_name)
-    else:
-        st.warning("❌ ไม่พบ Order")
+        st.success("✅ ประมวลผลครบแล้ว!")
+
+# ----------------------
+# RESULT
+# ----------------------
+st.subheader("📊 ผลลัพธ์สะสม")
+
+if st.session_state.results:
+
+    df = pd.DataFrame(st.session_state.results).drop_duplicates()
+
+    st.write(f"📦 ประมวลผลแล้ว: {st.session_state.processed_files} ไฟล์")
+    st.dataframe(df)
+
+    file_name = "orders.xlsx"
+    df.to_excel(file_name, index=False)
+
+    with open(file_name, "rb") as f:
+        st.download_button("📥 Download Excel", f, file_name)
+
+# ----------------------
+# RESET
+# ----------------------
+if st.button("🗑️ เคลียร์ข้อมูล"):
+    st.session_state.results = []
+    st.session_state.processed_files = 0
+    st.success("ล้างข้อมูลแล้ว")
