@@ -4,3 +4,4 @@ opencv-python-headless
 pandas
 openpyxl
 pillow
+pdf2image

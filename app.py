@@ -5,58 +5,83 @@ import numpy as np
 import pandas as pd
 import re
 from PIL import Image
+from pdf2image import convert_from_bytes
 
-# ----------------------
-# CONFIG
-# ----------------------
 st.set_page_config(page_title="OCR Order Reader", layout="centered")
 
-st.title("📄 OCR ใบแปะหน้า")
-st.write("อัปโหลดภาพ → ดึงเลข Order → Export Excel")
+st.title("📄 OCR ใบแปะหน้า (PDF รองรับหลายหน้า)")
+st.write("อัปโหลด PDF / รูป → ดึงเลข Order → Export Excel")
 
 # ----------------------
-# FUNCTION: OCR + Extract
+# OCR FUNCTION
 # ----------------------
-def extract_orders(image):
+def extract_orders_from_image(image, page_num):
     img = np.array(image)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # ปรับภาพให้ชัดขึ้น
     gray = cv2.GaussianBlur(gray, (5,5), 0)
     _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
 
     text = pytesseract.image_to_string(thresh)
 
-    # 🔥 ปรับ regex ตาม format จริงได้
     orders = re.findall(r'\b\d{6,}\b', text)
 
-    return text, list(set(orders))
+    results = []
+    for o in orders:
+        results.append({
+            "Order Number": o,
+            "Page": page_num
+        })
+
+    return results
 
 # ----------------------
-# UI
+# FILE UPLOAD
 # ----------------------
 uploaded_file = st.file_uploader(
-    "📤 อัปโหลดใบแปะหน้า",
-    type=["jpg", "jpeg", "png"]
+    "📤 อัปโหลดไฟล์",
+    type=["jpg", "jpeg", "png", "pdf"]
 )
 
 if uploaded_file:
-    image = Image.open(uploaded_file)
+    all_orders = []
 
-    st.image(image, caption="📸 ภาพที่อัปโหลด", use_container_width=True)
+    with st.spinner("🔍 กำลังประมวลผล... (PDF ใหญ่จะใช้เวลา)"):
+        
+        # ----------------------
+        # PDF CASE
+        # ----------------------
+        if uploaded_file.type == "application/pdf":
+            pages = convert_from_bytes(uploaded_file.read())
 
-    with st.spinner("🔍 กำลังอ่านข้อมูล..."):
-        text, orders = extract_orders(image)
+            st.info(f"📄 จำนวนหน้า: {len(pages)}")
 
-    # แสดงข้อความ OCR
-    with st.expander("📃 ดูข้อความทั้งหมด"):
-        st.text(text)
+            for i, page in enumerate(pages):
+                st.write(f"กำลังอ่านหน้า {i+1}...")
+                results = extract_orders_from_image(page, i+1)
+                all_orders.extend(results)
 
-    # แสดงผล Order
+        # ----------------------
+        # IMAGE CASE
+        # ----------------------
+        else:
+            image = Image.open(uploaded_file)
+            st.image(image, caption="📸 ภาพที่อัปโหลด")
+
+            results = extract_orders_from_image(image, 1)
+            all_orders.extend(results)
+
+    # ----------------------
+    # RESULT
+    # ----------------------
     st.subheader("📦 Order ที่พบ")
 
-    if orders:
-        df = pd.DataFrame(orders, columns=["Order Number"])
+    if all_orders:
+        df = pd.DataFrame(all_orders)
+
+        # ลบ duplicate (optional)
+        df = df.drop_duplicates()
+
         st.dataframe(df, use_container_width=True)
 
         # Export Excel
